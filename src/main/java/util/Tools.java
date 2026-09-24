@@ -19,6 +19,5 @@ public class Tools {
     public void goodbye(){
         AgentRunner.getRunner().setRunFlag(false);
         AgentRunner.getRunner().close();
-
     }
 }

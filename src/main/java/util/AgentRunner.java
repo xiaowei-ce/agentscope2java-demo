@@ -58,50 +58,43 @@ public class AgentRunner {
             .model(deepseek_flash)
             .workspace(Path.of(".agent/workspace"))
             .stateStore(new JsonFileAgentStateStore(Path.of(".agent/agentstate")))
-//            .stateStore(new InMemoryAgentStateStore())
             .toolkit(toolkit)
             .compaction(compactionConfig).build();
 
 
     public void run(String msg, RuntimeContext context){
-        agent.streamEvents(msg, context).doOnNext(event -> {
+        agent.streamEvents(msg, context).doOnNext(agentEvent -> {
 
-            if (event instanceof RequireUserConfirmEvent confirmEvent) {
-                List<ConfirmResult> confirmResults = new ArrayList<>(confirmEvent.getToolCalls().size());
-                confirmEvent.getToolCalls().forEach(tc -> {
-                    out.printf("allowed: %s \n", som.writeValueAsString(tc));
-                    ConfirmResult confirmResult = new ConfirmResult(true, tc);
-                    confirmResults.add(confirmResult);
-                });
+            switch (agentEvent){
+                case AgentStartEvent event -> out.print("AGENT: ");
+                case AgentEndEvent event -> out.println();
 
-                UserMessage confirmMsg = UserMessage.builder()
-                        .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, confirmResults))
-                        .build();
-                agent.call(confirmMsg, context).block();
-            }
+                case ThinkingBlockStartEvent event -> out.print("[think: ");
+                case ThinkingBlockDeltaEvent event -> out.print(event.getDelta());
+                case ThinkingBlockEndEvent event -> out.println("]");
 
+                case TextBlockStartEvent event -> {}
+                case TextBlockDeltaEvent event -> out.print(event.getDelta());
+                case TextBlockEndEvent event -> out.println();
 
-            switch (event.getType()) {
+                case ToolCallStartEvent event -> out.printf("[tool]: %s \n", som.writeValueAsString(agentEvent));
+                case ToolCallDeltaEvent event -> out.print(event.getDelta());
+                case ToolCallEndEvent event -> out.println();
 
-                case AgentEventType.AGENT_START -> out.print("AGENT: ");
+                case RequireUserConfirmEvent event -> {
+                    List<ConfirmResult> confirmResults = new ArrayList<>(event.getToolCalls().size());
+                    event.getToolCalls().forEach(tc -> {
+                        out.printf("allowed: %s\n", tc);
+                        confirmResults.add(new ConfirmResult(true, tc));
+                    });
+                    UserMessage confirmMsg = UserMessage.builder()
+                            .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, confirmResults))
+                            .build();
+                    agent.call(confirmMsg, context).block();
+                }
+                case UserConfirmResultEvent event -> out.printf("confirm: %s\n", event.getConfirmResults());
 
-                case AgentEventType.THINKING_BLOCK_START -> out.print("[think: ");
-                case AgentEventType.THINKING_BLOCK_DELTA -> out.print(
-                        ((ThinkingBlockDeltaEvent)event).getDelta()
-                );
-                case AgentEventType.THINKING_BLOCK_END -> out.print("]\n");
-
-
-//                case AgentEventType.TEXT_BLOCK_START -> out.print("AGENT: ");
-                case AgentEventType.TEXT_BLOCK_DELTA -> out.print(
-                        ((TextBlockDeltaEvent) event).getDelta()
-                );
-                case AgentEventType.TEXT_BLOCK_END -> out.print('\n');
-
-                case AgentEventType.TOOL_CALL_START -> out.printf("[tool]: %s \n", som.writeValueAsString(event));
-                case AgentEventType.TOOL_CALL_DELTA -> out.print(((ToolCallDeltaEvent) event).getDelta());
-                case AgentEventType.TOOL_CALL_END -> out.println('\n');
-
+                default -> {}
             }
         }).blockLast();
     }
